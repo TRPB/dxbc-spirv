@@ -645,10 +645,18 @@ void LowerIoPass::enableFlatInterpolation(uint32_t locationMask) {
       auto op = *iter;
 
       auto location = uint32_t(op.getOperand(op.getFirstLiteralOperandIndex()));
-      op.setOperand(op.getFirstLiteralOperandIndex() + 2u, InterpolationMode::eFlat);
 
-      if (locationMask & (1u << location))
-        m_builder.rewriteOp(iter->getDef(), std::move(op));
+      if (!(locationMask & (1u << location)))
+        continue;
+
+      auto operandIndex = op.getFirstLiteralOperandIndex() + 2u;
+
+      if (operandIndex < op.getOperandCount())
+        op.setOperand(operandIndex, InterpolationMode::eFlat);
+      else
+        op.addOperand(InterpolationModes(InterpolationMode::eFlat));
+
+      m_builder.rewriteOp(iter->getDef(), std::move(op));
     }
   }
 }
@@ -672,13 +680,24 @@ void LowerIoPass::enableSampleInterpolation() {
 
         auto op = *iter;
         auto operandIndex = op.getFirstLiteralOperandIndex() + (isBuiltIn ? 1u : 2u);
-        auto interpolation = InterpolationModes(op.getOperand(operandIndex));
+
+        bool operandExists = operandIndex < op.getOperandCount();
+
+        auto interpolation = operandExists
+          ? InterpolationModes(op.getOperand(operandIndex))
+          : InterpolationModes(0);
 
         if (!(interpolation & InterpolationMode::eFlat)) {
           /* Centroid exists to prevent extrapolation, so that is
            * safe to override when using sample interpolation. */
           interpolation -= InterpolationMode::eCentroid;
-          op.setOperand(operandIndex, interpolation | InterpolationMode::eSample);
+          interpolation |= InterpolationMode::eSample;
+
+          if (operandExists)
+            op.setOperand(operandIndex, interpolation);
+          else
+            op.addOperand(interpolation);
+
           m_builder.rewriteOp(iter->getDef(), std::move(op));
         }
       } break;
